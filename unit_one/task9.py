@@ -1,3 +1,4 @@
+#максимальное число из 3х X Y Z
 #the first version
 print("Enter X, Y, Z")
 x = int(input("Enter X:"))
