@@ -14,20 +14,19 @@ for line in f:
 f.close()
 
 
-print(lines)
 lines_new = list()
 for line in lines:
     for key in page:
         if key in line:
-            print(lines.index(line))
+            #print(lines.index(line))
             id = line.find("?")
-            print(line[:id] + page[key] + line[id + 1:])
+            #print(line[:id] + page[key] + line[id + 1:])
             lines_new.append(str(line[:id]) + str(page[key]) + str(line[id + 1:]))
             break
     else:
         lines_new.append(lines[lines.index(line)])
 
 
-f = open("index.html", "at+")
+f = open("index.html", "w")
 f.writelines(lines_new)
 f.close()
