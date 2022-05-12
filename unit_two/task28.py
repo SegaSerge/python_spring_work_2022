@@ -1,3 +1,5 @@
+# за основу взял классную работу(курсовую)
+
 import time
 import datetime
 
