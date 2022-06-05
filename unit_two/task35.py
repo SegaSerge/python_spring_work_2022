@@ -1,189 +1,169 @@
-# Задание необходимо ещё доделать(убрать лишнее и на общей БД запустить),
-# переделал базы под себя. Скидываю код, чтобы видно было, что хоть что-то делаю...
-
 import time
 import datetime
 import psycopg2
+import bcrypt
 
 from threading import Thread, Lock
 
 
 class Db:
-    __instance__ = None
+    """Класс создания подключения с использованием Singltone"""
 
-    def __init__(self):
-        self.__con = psycopg2.connect(database="postgres", user="", password="", host="localhost", port=5432)
-        # Проверяем конструктор на сущ. экземпляр
-        if Db.__instance__ is None:
-            Db.__instance__ = self.__con
-        else:
-            raise Exception("We can not creat another class")
+    __instance__ = None
+    instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls.instance:
+            cls.instance = object.__new__(cls)
+        return cls.instance
 
     @staticmethod
-    def get_instance():
-        if not Db.__instance__:
-            Db()
-        return Db.__instance__
-
-    # @staticmethod
-    # def get_connect():
-    #     return psycopg2.connect(database="postgres", user="", password="", host="localhost", port=5432)
+    def get_connect():
+        return psycopg2.connect(database="TestsSystem", user="", password="", host="localhost", port=5432)
 
 
 class Profile:
-    def __init__(self, name=None, lastname=None, age=None, password=None):
-        self.conn = Db.__instance__
-        self.name = name
-        self.lastname = lastname
-        self.age = age
-        self.password = password
-        self.login = None
+    __slots__ = ["name", "lastname", "otch", "group", "login", "password", "age", "conn"]
 
+    def __init__(self):
+        self.conn = Db().get_connect()
 
     def get_profile(self, login):
+        """Возвращает пароль из БД по введенному логину"""
+        password = TestSystem().get_list_like("password", "profile", "login", login)
+        return password
 
+    def set_profile(self, name, lastname, group, login, password, email):
+        """ полученные данные вносит в БД, проверяя существование группы"""
         curs = self.conn.cursor()
-        curs.execute(f"""SELECT "login" , "password" FROM "profile" where "login" LIKE '{login}' """)
-        log_pass = curs.fetchall()
-        return log_pass
+        password_hashed = bcrypt.hashpw(bytes(str(password), encoding="utf8"),
+                                        bcrypt.gensalt()).decode('utf-8')
 
-    def set_profile(self, name, lastname, otch, group, login, password):
-        curs = self.conn.cursor()
-        curs.execute(f"""INSERT INTO "student" ("name", "lastname", "patronymic", "group") 
-        VALUES ('{name}', '{lastname}', '{otch}', '{group}')""")
-        self.conn.commit()
+        id_group = TestSystem().get_list_like("id_group", "group", "name", group)
 
-        curs.execute(f"""SELECT "id_student" FROM "student" 
-        where "name" LIKE '{name}' and "lastname" LIKE '{lastname}' """)
-        id_student = curs.fetchall()
-
-        curs.execute(f"""INSERT INTO "profile" VALUES ('{login}','{password}','{id_student[0][0]}') """)
-        self.conn.commit()
-        #self.conn.close()
+        if len(id_group) == 0:
+            print("Такой группы нет! уточните номер группы и введите повторно данные")
+            Auth().registration()
+        else:
+            curs.execute(f"""INSERT INTO "profile" ("name", "lastname", "id_group", "login", "password", "email") 
+            VALUES ('{name}', '{lastname}', '{id_group[0][0]}', '{login}', '{password_hashed}', '{email}')""")
+            self.conn.commit()
 
 
 class Auth:
+    """ Класс аутентификации Логин Регистрация и ЛогАут"""
     LOGIN = None
+    is_auth = bool()
+
     def __init__(self):
-        self.conn = Db.__instance__
+        self.conn = Db.get_connect()
         self.login = None
         self.password = None
-        self.name = None
-        self.lastname = None
-        self.patronymic = None
-        self.group = None
-        self.age = None
-        self.tel = None
-        self.email = None
-    """Класс содержит методы регистрации, захода в систему и выхода из нее"""
-    is_auth = bool()
 
     def registration(self):
         self.login = input("login: ")
-        self.password = input("password: ")
-        self.name = input("name: ")
-        self.lastname = input("lastname: ")
-        self.patronymic = input("patronymic: ")
-        self.group = input("group: ")
-        self.age = input("age: ")
-        self.tel = input("tel: ")
-        self.email = input("email: ")
 
-        Profile().set_profile(self.name, self.lastname, self.patronymic, self.group, self.login, self.password)
+        if TestSystem().get_list_like("login", "profile", "login", self.login):
+            print("Такой логин уже существует!")
+            Auth().registration()
+
+        password = input("password: ")
+        name = input("name: ")
+        lastname = input("lastname: ")
+        group = input("group: ")
+        email = input("email: ")
+        Profile().set_profile(name, lastname, group, self.login, password, email)
         Auth.LOGIN = self.login
-        self.conn.close()
         Auth.is_auth = True
+
         return Auth.is_auth
 
     def log_in(self):
-        print("Enter your:")
+        print("Hello! Enter your:")
         self.login = input("login: ")
         self.password = input("password: ")
         prof = Profile().get_profile(self.login)
         Auth.LOGIN = self.login
-        if len(prof):
-            if self.password == str(prof[0][1]):
+
+        if len(prof) == 0:
+            print("Такого пользователя не существует! пройдите регистрацию!")
+            Auth().registration()
+        else:
+            tf = (bcrypt.checkpw(self.password.encode(), bytes(prof[0][0], encoding="utf8")))
+            if tf is True:
                 Auth.is_auth = True
                 return Auth.is_auth
             else:
-                print("wrong password"), Auth().log_in()
-        else:
-            print("Профиль не найден! пройдите регистрацию!")
-            Auth().registration()
+                print("Не верный пароль!")
+                Auth().log_in()
 
     def logout(self):
         Auth.is_auth = False
 
 
 class SaveResult:
+    """ Сохранение результатов """
 
     def __init__(self):
-        self.conn = Db.get_instance()
+        self.conn = Db().get_connect()
         self.login = Auth.LOGIN
         self.curs = self.conn.cursor()
 
     def save_result(self, test, d_time, result, timer):
-        self.curs.execute(f"""INSERT INTO "test_result" ("login", "dt_time", "test", "result", "tm_test") 
-                VALUES ('{self.login}','{d_time}', '{test}', '{result}', '{timer}')""")
+        id_profile = TestSystem().get_list_like("id_profile", "profile", "login", self.login)
+        self.curs.execute(f"""INSERT INTO "test_result" ("id_profile", "login", "dt_time", "test", "result", "tm_time") 
+                VALUES ('{id_profile[0][0]}','{self.login}','{d_time}', '{test}', '{result}', '{timer}')""")
         self.conn.commit()
 
 
 class Test:
     def __init__(self):
-        self.conn = Db.get_instance()
+        self.conn = Db().get_connect()
 
     """ В классе реализуем методы работы с БД """
 
     def get_list_tests(self):
+        """ получение списка тестов """
         curs = self.conn.cursor()
         curs.execute(""" SELECT "id_test", "theme" FROM "test" """)
         tests = curs.fetchall()
         return tests
 
     def get_questions(self, id_test):
+        """ получение списков вопросов """
         curs = self.conn.cursor()
-        curs.execute(f""" SELECT "id_question", "id_answer", "status" FROM "test_question" 
+        curs.execute(f""" SELECT "id_question", "id_answer", "status" FROM "test_questions" 
                                 WHERE "id_test" = {id_test} """)
         test = curs.fetchall()
         return test
 
 
 class TestSystem:
+    "Класс взаимодействует с моделью и представлением. Включает всю бизнес логику системы."
     def __init__(self):
-        self.conn = Db.get_instance()
+        self.conn = Db().get_connect()
         self.curs = self.conn.cursor()
     t_out = False
 
-    "Класс взаимодействует с моделью и представлением. Включает всю бизнес логику системы."
     def run(self):
-
+        """Метод реализует запуск теста"""
         while not Auth.is_auth:
             Auth().log_in()
         else:
-            print("Вы Вошли в систему Тестирования!", "\n",
+            print(f"{Auth.LOGIN}, Вы Вошли в систему Тестирования!", "\n",
                   "Для Начала теста выберете Тему и тест начнётся!", "\n",
                   "У Вас 5 минут на решение теста")
             TestView().render()
-        """Метод реализует запуск теста"""
 
-    def show_list(self):
-        """Метод реализует вывод списка тестов на экран"""
-        pass
+    def get_list(self, row, table, condition, elem):
+        self.curs.execute(f""" SELECT "{row}" FROM "{table}" WHERE "{condition}" = {elem} """)
+        list_ = self.curs.fetchall()
+        return list_
 
-    def show_question(self, id_question):
-        pass
-        """Метод реализует вывод списка тестов на экран"""
-
-    def get_list_questions(self, elem):
-
-        self.curs.execute(f""" SELECT "text_question" FROM "question" WHERE "id_question" = {elem} """)
-        test = self.curs.fetchall()
-        return test
-
-    def get_list_answer(self, elem):
-        self.curs.execute(f""" SELECT "answer" FROM "answer" WHERE "id_answer" = {elem} """)
-        answers = self.curs.fetchall()
-        return answers
+    def get_list_like(self, row, table, condition, elem):
+        self.curs.execute(f""" SELECT "{row}" FROM "{table}" WHERE "{condition}" LIKE '{elem}' """)
+        list_ = self.curs.fetchall()
+        return list_
 
 
 class View:
@@ -199,57 +179,70 @@ class QuestionView(View):
     stop_thread = False
 
     def render(self, data=None):
+        """Метод реализует отрисовку вопроса с вариантами ответа и строкой выбора варианта,
+        выставление необходимого времени на тест"""
+
         stud_result = 0
-        q = list()
-        q1 = list()
-        q2 = list()
+        qustions = list()
+        answers = list()
+        answ_t_f = list()
         list_question = Test().get_questions(data)
 
         for qust1, qust2, qust3 in list_question:
-            q.append(qust1)  # вопрос
-            q1.append(qust2)  # ответ
-            q2.append(qust3)  # тру/фолс
+            qustions.append(qust1)  # вопросы
+            answers.append(qust2)  # ответы
+            answ_t_f.append(qust3)  # тру/фолс
 
-        quest = sorted(set(q))
+        quest = sorted(set(qustions))
 
-        k_a = len(q1) / len(quest)
+        k_a = len(answers) / len(quest)
+        # для определения количества ответов в вопросах(ответов в вопросах равное количество)
         k = 0
         # вывод вопроса по id
         for elem in quest:
             c = 1
-            test1 = TestSystem().get_list_questions(elem)
+            test1 = TestSystem().get_list("text_question", "questions", "id_question", elem)
             for t in test1:
                 print("Вопрос: ", str(t).strip("( ) , ' "))
 
             # вывод и чтение ответов
             for i in range(k, int(k + k_a)):
-                ans1 = TestSystem().get_list_answer(q1[i])
+                # ans1 = TestSystem().get_list_answer(q1[i])
+                ans1 = TestSystem().get_list("text_answer", "answers", "id_answer", answers[i])
                 print(f"{c}. ", str(ans1[0]).strip("(),'"))
                 c += 1
 
             stud_answer = int(input("Enter yuor answer: "))
-            stud_result += 1 if q2[stud_answer - 1 + k] is True else None
+            if answ_t_f[stud_answer - 1 + k] is True:
+                stud_result += 1
             k += int(k_a)
-        return stud_result
+        s_r = list()
+        s_r.append(f"{stud_result} from {len(quest)}")
+        return s_r
 
     def t_render(self, data):
+        """ Метод реализует проверку времени и выставление оценки """
         st_r = list()
 
         d_time = datetime.datetime.now()
         t_f_time = time.time()
-        th = Thread(target=(st_r .append(QuestionView().render(data))))
+        th = Thread(target=(st_r.append(QuestionView().render(data))))
         th.start()
         QuestionView.lock.acquire()
         QuestionView.stop_thread = True
         QuestionView.lock.release()
 
         test_time = time.time() - t_f_time
-        SaveResult().save_result(data, d_time, st_r, test_time)
-        print("Поздравляю! Ваш тест завершён!", "\n" "Ваша оценка: ", st_r)
-        time.sleep(5)
-        Auth().logout()
+        if (test_time - 10.0) < 1e-2:
+            print("Поздравляю! Ваш тест завершён!", "\n" "Ваша оценка: ", str(st_r).strip("[]'"))
+            SaveResult().save_result(data, d_time, st_r[0][0], test_time)
+        else:
+            print("Вы не сдали тест, т.к затратили больше времени на выполнение", "\n",
+                  f"Но Вы ответила на {st_r[0][0]} вопросов ")
+            SaveResult().save_result(data, d_time, "FALSE", test_time)
 
-    """Метод реализует отрисовку вопроса с вариантами ответа и строкой выбора варианта"""
+        time.sleep(2)
+        Auth().logout()
 
 
 class TestView(View):
@@ -265,17 +258,3 @@ class TestView(View):
 
 
 TestSystem().run()
-
-
-class RegistrationView(View):
-    """В классе перегружаем виртуальный метод  render от родителя"""
-
-    def render(self, data):
-        """Метод реализует отрисовку регистрации пользователя"""
-
-
-class LoginView(View):
-    """В классе перегружаем виртуальный метод  render от родителя"""
-
-    def render(self, data):
-        """Метод реализует отрисовку входа по логину и паролю для зарегистрированного пользователя"""
